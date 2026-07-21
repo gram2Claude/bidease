@@ -26,10 +26,11 @@
 > объявлений» в Bidease нет — иерархия: кампания → креатив. Охватных метрик (reach)
 > нет → функций типа «Охват» нет. `todate` эксклюзивна — функции принимают обе даты
 > включительно, библиотека сама передаёт `todate = date_to + 1 день`.
-> Расчётные метрики API (`ctr`, `ecpm`, `ecpc`, `i2c`, `cpi`) не выгружаются (конвенция
+> Расчётные метрики API (`ctr`, `ecpm`, `ecpc`, `cpi` и др.) не выгружаются (конвенция
 > проекта); `conversions`/`revenue`/`iap*`/`goal1–6` исключены решением проекта 2026-07-21
-> (только базовые: показы/клики/расход). ⚠️ `spend` приходит **в долларах** — применимость
-> НДС-производных (`costs_without_nds`) уточняется на этапе спеки функции статистики.
+> (только базовые: показы/клики/расход). ⚠️ `spend` — **доллары БЕЗ НДС** (решение
+> 2026-07-21): `costs_without_nds` ← `spend`, `costs_nds` = `costs_without_nds` ×
+> (1 + ставка НДС по году даты) — направление обратное avito. `source_type_id = 10`.
 
 ---
 
@@ -92,10 +93,11 @@ Fn5. Колонки выходного DataFrame (перечисли имена 
      Правило: все имена колонок — snake_case.
      Типы данных определяются автоматически из ответа API.
      → Плейсхолдер: {DF_2_COLUMNS}
-     Маппинг на API: date←Day, campaign_id←CampaignID; метрики impressions, clicks —
-       1:1; costs_nds←spend (⚠️ доллары). Названий в статистике нет (конвенция) —
-       campaign_name джойнить из get_campaign_dict. Один запрос на весь период
-       (todate = date_to + 1 день из-за эксклюзивности).
+     Маппинг на API: date←Day (CSV `day`), campaign_id←CampaignID (CSV `campaignid`);
+       метрики impressions, clicks — 1:1; costs_without_nds←spend (доллары БЕЗ НДС),
+       costs_nds = costs_without_nds × (1+НДС года даты). Названий в статистике нет
+       (конвенция) — campaign_name джойнить из get_campaign_dict. Один запрос на весь
+       период (todate = date_to + 1 день из-за эксклюзивности).
 ```
 
 ---
@@ -124,9 +126,10 @@ Fn5. Колонки выходного DataFrame (перечисли имена 
      Правило: все имена колонок — snake_case.
      Типы данных определяются автоматически из ответа API.
      → Плейсхолдер: {DF_3_COLUMNS}
-     Маппинг на API: date←Day, campaign_id←CampaignID, creative_id←CreativeID;
-       метрики как в функции 2. Уровня групп в Bidease нет → формула id_key_ad
-       без group-звена (уточняется в спеке: id_key_camp + "_" + creative_id).
+     Маппинг на API: date←Day, campaign_id←CampaignID, creative_id←CreativeID
+       (CSV: `day`, `campaignid`, `creativeid`); метрики как в функции 2.
+       Уровня групп в Bidease нет → id_key_ad = id_key_camp + "_" + creative_id
+       (решение 2026-07-21, без group-звена).
 ```
 
 ---

@@ -54,11 +54,11 @@ MAX_GROUPS = 7                  # максимум группировок (`grou
 # финализируются в спеках функций (Шаг 4).
 
 CAMPAIGN_DICT_COLUMNS = [
-    "campaign_id",       # CampaignID
-    "campaign_name",     # CampaignName
-    "advertiser_id",     # AdvertiserID
+    "campaign_id",       # CampaignID (CSV-колонка `campaignid`)
+    "campaign_name",     # CampaignName (CSV-колонка `campaignname`)
+    "advertiser_id",     # AdvertiserID (CSV-колонка `advertiserid`)
     "account_id",        # константа: 1
-    "source_type_id",    # константа-пример (вписывается клиентом при интеграции)
+    "source_type_id",    # константа: 10 (решение проекта 2026-07-21)
     "product_id",        # ProductID — реальный ID продукта Bidease (не константа, см. спеку)
     "product_name",      # константа: "prod_test"
     "camp_type",         # константа: "camp_test"
@@ -67,25 +67,31 @@ CAMPAIGN_DICT_COLUMNS = [
     "owner_id",          # константа: 1
 ]
 
+# ⚠️ НДС (решение проекта 2026-07-21): spend в источнике — доллары БЕЗ НДС.
+# Поэтому направление расчёта ОБРАТНОЕ avito:
+#   costs_without_nds ← spend (float, округление до 2 знаков)
+#   costs_nds = costs_without_nds * (1 + ставка_НДС); ставка по году даты строки:
+#   год ≥ 2026 → 22% (множитель 1.22), ранее → 20% (множитель 1.20)
+
 CAMPAIGNS_STAT_COLUMNS = [
-    "date",                   # Day
-    "campaign_id",            # CampaignID
+    "date",                   # Day (CSV-колонка `day`)
+    "campaign_id",            # CampaignID (CSV-колонка `campaignid`)
     "impressions",            # impressions
     "clicks",                 # clicks
-    "costs_nds",              # spend (⚠️ доллары; float, округление до 2 знаков)
-    "costs_without_nds",      # costs_nds / (1+НДС); ставка по году даты: 2026+ → 22%, ранее → 20%
+    "costs_nds",              # costs_without_nds * (1 + ставка_НДС по году даты)
+    "costs_without_nds",      # ← spend (доллары БЕЗ НДС; float, округление до 2 знаков)
     "ak",                     # константа: 0.5 (агентская комиссия)
     "costs_nds_ak",           # вычисляется: costs_nds * (1 + ak)
     "costs_without_nds_ak",   # вычисляется: costs_without_nds * (1 + ak)
     "account_id",             # константа: 1
-    "source_type_id",         # константа-пример
+    "source_type_id",         # константа: 10
     "id_key_camp",            # вычисляется: "1_" + campaign_id
 ]
 
 CREATIVES_STAT_COLUMNS = [
-    "date",                   # Day
-    "campaign_id",            # CampaignID
-    "creative_id",            # CreativeID
+    "date",                   # Day (CSV-колонка `day`)
+    "campaign_id",            # CampaignID (CSV-колонка `campaignid`)
+    "creative_id",            # CreativeID (CSV-колонка `creativeid`)
     "impressions",
     "clicks",
     "costs_nds",
@@ -96,7 +102,7 @@ CREATIVES_STAT_COLUMNS = [
     "account_id",
     "source_type_id",
     "id_key_camp",
-    "id_key_ad",              # формула без group-звена (в Bidease нет групп) — финализируется в спеке
+    "id_key_ad",              # вычисляется: id_key_camp + "_" + creative_id (групп в Bidease нет; решение 2026-07-21)
 ]
 
 ADMIN_AUDIT_COLUMNS = [
