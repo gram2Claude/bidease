@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Секреты и окружение
+.env
+TEMP_SECRET_PASTE.txt
+
+# Локальные данные (CSV-результаты лежат в bidease/raw_data/, см. его .gitignore)
