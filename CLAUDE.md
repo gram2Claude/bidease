@@ -25,11 +25,13 @@ explicitly to the constructor.
 Шаги 0–3 завершены (структура, анкета, сводка API, скаффолд). Токен получен, проверен
 живым запросом, лежит в `bidease/.env` (`TEST_START_DATE=2026-07-21`, `TEST_END_DATE=2026-07-22`).
 
-**Шаг 4 — в процессе:** спека функции 1 — `specs/01_spec_get_campaign_dict.md` —
-написана и **ждёт утверждения пользователем** (гейт процесса: spec → утверждение →
-plan → утверждение → impl → smoke). Все 4 публичные функции — пока стабы
-с `NotImplementedError`. Порядок реализации: `get_campaign_dict` →
-`get_campaigns_daily_stat` → `get_creatives_daily_stat` → `get_admin_audit`.
+**Шаг 4 — в процессе:** функция 1 — **`get_campaign_dict` РЕАЛИЗОВАНА 2026-07-22**
+(спека утверждена пользователем; план `plans/01_plan_get_campaign_dict.md`; юнит-тесты
+6/6 зелёные, вкл. мутационно проверенный гард форса UTF-8; smoke на живом API пройден —
+2 кампании; независимое код-ревью пройдено; реестр `info/01_functions_implemented.md`
+заведён). Остальные 3 функции — стабы; порядок: `get_campaigns_daily_stat` →
+`get_creatives_daily_stat` → `get_admin_audit` (гейт процесса: spec → утверждение →
+plan → impl → smoke). Следующий шаг — спека `get_campaigns_daily_stat`.
 
 **✅ Вопрос про данные закрыт (2026-07-22):** на аккаунте появилась реальная активность —
 с 2026-07-21 крутятся 2 кампании (`154369` android / `154402` ios, «x5_x5_igronik_Пятерочка_МояВыгода»,
@@ -73,11 +75,12 @@ Single-file library: `bidease/bidease.py`.
   (макс. 5 повторов, старт 1 с; лимиты API не документированы — защита).
 - `_parse_csv()` → пустое тело = пустой DataFrame.
 
-**Public functions** (all return `pd.DataFrame`; все — стабы до Шага 4):
+**Public functions** (all return `pd.DataFrame`; реализована `get_campaign_dict`,
+остальные — стабы Шага 4):
 
 | Function | Granularity | Запрос к API |
 |----------|-------------|--------------|
-| `get_campaign_dict()` | справочник (кампании) | `group=CampaignID+CampaignName+AdvertiserID+ProductID`, период — последний год |
+| `get_campaign_dict()` ✅ | справочник (кампании) | `group=CampaignID+CampaignName+AdvertiserID+ProductID`, период — последний год |
 | `get_campaigns_daily_stat(date_from, date_to)` | статистика по дням (кампании) | `group=Day+CampaignID`, один запрос на период |
 | `get_creatives_daily_stat(date_from, date_to)` | статистика по дням (креативы) | `group=Day+CampaignID+CreativeID`, один запрос на период |
 | `get_admin_audit(date_from, date_to)` | сводный аудит по дням (admin_audit) | собственного запроса нет — агрегат поверх campaigns stats |

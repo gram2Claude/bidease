@@ -1,10 +1,10 @@
 """Bidease Reporting API client.
 
 Публичные функции, возвращающие pandas DataFrame:
-- get_campaign_dict()                          — справочник кампаний из группировок отчёта
-- get_campaigns_daily_stat(date_from, date_to) — дневная статистика по кампаниям
-- get_creatives_daily_stat(date_from, date_to) — дневная статистика по креативам
-- get_admin_audit(date_from, date_to)          — сводный аудит по дням (агрегат)
+- get_campaign_dict()                          — справочник кампаний из группировок отчёта [реализована]
+- get_campaigns_daily_stat(date_from, date_to) — дневная статистика по кампаниям [стаб]
+- get_creatives_daily_stat(date_from, date_to) — дневная статистика по креативам [стаб]
+- get_admin_audit(date_from, date_to)          — сводный аудит по дням (агрегат) [стаб]
 
 Учётные данные читаются из переменной окружения API_TOKEN
 (или передаются явно в BideaseClient).
@@ -48,6 +48,17 @@ MAX_GROUPS = 7                  # максимум группировок (`grou
 
 # ⚠️ todate в API — ЭКСКЛЮЗИВНАЯ граница. Публичные функции принимают date_from/date_to
 # ВКЛЮЧИТЕЛЬНО; в запрос передаётся todate = date_to + 1 день (см. _todate_exclusive).
+
+# CSV-колонки группировок приходят в нижнем регистре значения `group` (факт API) —
+# маппинг в snake_case итоговых DataFrame; переиспользуется всеми функциями.
+GROUP_CSV_RENAME = {
+    "day": "date",
+    "campaignid": "campaign_id",
+    "campaignname": "campaign_name",
+    "advertiserid": "advertiser_id",
+    "productid": "product_id",
+    "creativeid": "creative_id",
+}
 
 # ── Колонки итоговых DataFrame — фиксируют порядок и состав полей ─────────────
 # Предварительные наборы по manual_forms/03_ENTITY_FUNCTIONS.md;
@@ -194,6 +205,16 @@ def _todate_exclusive(date_to: str) -> str:
     return (d + timedelta(days=1)).isoformat()
 
 
+def _dict_period() -> tuple[str, str]:
+    """Период запроса справочника: (сегодня − 364 дня, сегодня), ISO YYYY-MM-DD.
+
+    364 дня — безопасно внутри лимита API «1 год от текущей даты» (366+ → HTTP 400,
+    факт). todate эксклюзивна → данные по вчера включительно.
+    """
+    today = date.today()
+    return (today - timedelta(days=364)).isoformat(), today.isoformat()
+
+
 def _validate_period(date_from: str, date_to: str) -> None:
     """Проверяет период: формат дат, date_from ≤ date_to, в пределах 1 года от сегодня."""
     start = datetime.strptime(date_from, "%Y-%m-%d").date()
@@ -207,18 +228,55 @@ def _validate_period(date_from: str, date_to: str) -> None:
         )
 
 
-# ── Публичные функции (стабы — реализуются на Шаге 4 через spec → plan → impl) ─
+# ── Публичные функции ─────────────────────────────────────────────────────────
+# Нереализованные — стабы NotImplementedError (Шаг 4: spec → plan → impl по одной).
 
 def get_campaign_dict() -> pd.DataFrame:
     """Справочник кампаний из группировок отчёта.
 
     GET /stats, group=CampaignID+CampaignName+AdvertiserID+ProductID,
     период — последний год (максимум API); метрики отбрасываются,
-    дедупликация по campaign_id.
+    дедупликация по campaign_id. В справочник попадают только кампании,
+    имевшие хотя бы одно событие за период (специфика Bidease — справочных
+    эндпоинтов в API нет).
 
     Возвращает DataFrame с колонками CAMPAIGN_DICT_COLUMNS.
     """
-    raise NotImplementedError("Реализуется на Шаге 4 (spec → plan → impl)")
+    client = BideaseClient()
+    fromdate, todate = _dict_period()
+    df = client._get_report([
+        ("fromdate", fromdate),
+        ("todate", todate),
+        ("group", "CampaignID"),
+        ("group", "CampaignName"),
+        ("group", "AdvertiserID"),
+        ("group", "ProductID"),
+    ])
+    # Пустое тело или только заголовок (пустой аккаунт) — не ошибка
+    if df.empty:
+        return pd.DataFrame(columns=CAMPAIGN_DICT_COLUMNS)
+
+    df = df.rename(columns=GROUP_CSV_RENAME)
+    group_cols = ["campaign_id", "campaign_name", "advertiser_id", "product_id"]
+    df = df[[c for c in group_cols if c in df.columns]]
+    if "campaign_id" not in df.columns:
+        return pd.DataFrame(columns=CAMPAIGN_DICT_COLUMNS)
+    df = df.dropna(subset=["campaign_id"]).drop_duplicates(subset=["campaign_id"], keep="first")
+    if df.empty:
+        return pd.DataFrame(columns=CAMPAIGN_DICT_COLUMNS)
+    df["campaign_id"] = df["campaign_id"].astype("int64")
+
+    # Обогащение DataFrame (соглашение проекта) — см. CLAUDE.md;
+    # product_id НЕ трогаем — реальный ProductID из API (решение 2026-07-21)
+    df["account_id"] = 1
+    df["source_type_id"] = 10
+    df["product_name"] = "prod_test"
+    df["camp_type"] = "camp_test"
+    df["camp_category"] = "cat_test"
+    df["id_key_camp"] = "1_" + df["campaign_id"].astype(str)
+    df["owner_id"] = 1
+
+    return df.reindex(columns=CAMPAIGN_DICT_COLUMNS).reset_index(drop=True)
 
 
 def get_campaigns_daily_stat(date_from: str, date_to: str) -> pd.DataFrame:
