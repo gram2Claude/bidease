@@ -79,5 +79,168 @@ def get_campaign_dict() -> pd.DataFrame:
 
 ---
 
-Нереализованные (стабы): `get_campaigns_daily_stat`, `get_creatives_daily_stat`,
-`get_admin_audit` — очередь Шага 4.
+## Функция: `get_campaigns_daily_stat`
+
+- **Статус:** реализована
+- **Дата реализации:** 2026-07-22
+- **Тип:** статистика (кампании, по дням)
+- **Файл:** `bidease/bidease.py` → модульная функция `get_campaigns_daily_stat()`
+- **Spec:** `specs/02_spec_get_campaigns_daily_stat.md`
+- **Plan:** `plans/02_plan_get_campaigns_daily_stat.md`
+- **Smoke-test:** `bidease/smoke_tests/test_get_campaigns_daily_stat.py`
+- **Unit-tests:** `bidease/tests/test_get_campaigns_daily_stat.py`
+
+### API-метод
+
+- **Endpoint:** `GET /api/reporting/v1/stats`, `group=Day+CampaignID`
+- **Тип:** sync — **один GET на весь период** (группировка серверная, пагинации нет)
+- **Формат ответа:** `text/csv` (UTF-8 форсируется клиентом)
+- **Ссылка на сводку:** `info/00_api_methods.md`
+
+### Параметры функции (Python-сигнатура)
+
+```python
+def get_campaigns_daily_stat(date_from: str, date_to: str) -> pd.DataFrame:
+    ...
+```
+
+`date_from`/`date_to` — `YYYY-MM-DD`, **включительно** (в запрос уходит
+`todate = date_to + 1 день`, эксклюзивность API учтена). Валидация периода
+(`≤ 1 года от текущей даты`) — до запроса, `ValueError`.
+
+### Поля выходного DataFrame
+
+| Колонка (итоговая) | Тип pandas | Источник (поле API) | Описание |
+|--------------------|-----------|---------------------|----------|
+| `date` | object (str `YYYY-MM-DD`) | CSV `day` (`MM/DD/YYYY 00:00:00`) | дата; парсинг явным форматом, fail-loud |
+| `campaign_id` | int64 | CSV `campaignid` | ID кампании |
+| `impressions` | int64 | CSV `impressions` | показы |
+| `clicks` | int64 | CSV `clicks` | клики |
+| `costs_nds` | float64 | вычисляется: `costs_without_nds × (1+ставка года)` | ставка: год ≥ 2026 → 22%, ранее 20% |
+| `costs_without_nds` | float64 | ← CSV `spend`, round(2) | **доллары БЕЗ НДС** (решение 2026-07-21) — база расчёта |
+| `ak` | float64 | константа `0.5` | агентская комиссия |
+| `costs_nds_ak` | float64 | `costs_nds × 1.5` | |
+| `costs_without_nds_ak` | float64 | `costs_without_nds × 1.5` | |
+| `account_id` | int64 | константа `1` | пример |
+| `source_type_id` | int64 | константа `10` | решение 2026-07-21 |
+| `id_key_camp` | object | `"1_" + campaign_id` | составной ключ |
+
+### Специфика / сложности реализации
+
+- ⚠️ **Направление НДС ОБРАТНОЕ avito:** `spend` Bidease — доллары БЕЗ НДС → база
+  `costs_without_nds ← spend` (округляется только база), `costs_nds` — УМНОЖЕНИЕМ
+  на (1+ставка). Валюта не пересчитывается (доллары).
+- **Формат `day`** — `MM/DD/YYYY 00:00:00` (не ISO; факт 2026-07-22) — парсится
+  явным форматом `DAY_CSV_FORMAT`, несовпадение → громкая ошибка.
+- **Ставка НДС по-строчно** по году даты (период через границу года смешивает 1.20/1.22).
+- **Свежие даты «плывут»** — счётчики API обновляются на лету (факт 2026-07-22),
+  повторный вызов может дать немного иные суммы.
+- Пустой период → пустой DataFrame с колонками (не ошибка).
+
+### История изменений
+
+| Дата | Изменение | Причина |
+|------|-----------|---------|
+| 2026-07-22 | Первичная реализация | — |
+
+---
+
+## Функция: `get_creatives_daily_stat`
+
+- **Статус:** реализована
+- **Дата реализации:** 2026-07-22
+- **Тип:** статистика (креативы, по дням)
+- **Файл:** `bidease/bidease.py` → модульная функция `get_creatives_daily_stat()`
+- **Spec:** `specs/03_spec_get_creatives_daily_stat.md`
+- **Plan:** `plans/03_plan_get_creatives_daily_stat.md`
+- **Smoke-test:** `bidease/smoke_tests/test_get_creatives_daily_stat.py`
+- **Unit-tests:** `bidease/tests/test_get_creatives_daily_stat.py`
+
+### API-метод
+
+- **Endpoint:** `GET /api/reporting/v1/stats`, `group=Day+CampaignID+CreativeID`
+- **Тип:** sync — один GET на весь период
+- **Формат ответа:** `text/csv`
+
+### Параметры функции (Python-сигнатура)
+
+```python
+def get_creatives_daily_stat(date_from: str, date_to: str) -> pd.DataFrame:
+    ...
+```
+
+### Поля выходного DataFrame
+
+Как у `get_campaigns_daily_stat` + после `campaign_id`:
+
+| Колонка | Тип pandas | Источник | Описание |
+|---------|-----------|----------|----------|
+| `creative_id` | int64 | CSV `creativeid` | ID креатива |
+| `id_key_ad` | object | `id_key_camp + "_" + creative_id` | ⚠️ **без group-звена** — групп в Bidease нет (решение 2026-07-21) |
+
+### Специфика / сложности реализации
+
+- Иерархия Bidease: кампания → креатив (уровня групп объявлений нет) → `id_key_ad`
+  двухзвенный, отступление от avito-шаблона.
+- Строки без `campaign_id` ИЛИ `creative_id` отбрасываются (оба нужны для ключа).
+- Остальное — как у `get_campaigns_daily_stat` (общие хелперы).
+
+### История изменений
+
+| Дата | Изменение | Причина |
+|------|-----------|---------|
+| 2026-07-22 | Первичная реализация | — |
+
+---
+
+## Функция: `get_admin_audit`
+
+- **Статус:** реализована
+- **Дата реализации:** 2026-07-22
+- **Тип:** сводный аудит (агрегат по дням)
+- **Файл:** `bidease/bidease.py` → модульная функция `get_admin_audit()`
+- **Spec:** `specs/04_spec_get_admin_audit.md`
+- **Plan:** `plans/04_plan_get_admin_audit.md`
+- **Smoke-test:** `bidease/smoke_tests/test_get_admin_audit.py`
+- **Unit-tests:** `bidease/tests/test_get_admin_audit.py`
+
+### API-метод
+
+- **Собственного эндпоинта нет** — агрегат поверх `get_campaigns_daily_stat`
+  (+ `owner_id` из `get_campaign_dict`, join по `campaign_id`). Итого 2 HTTP-запроса.
+
+### Параметры функции (Python-сигнатура)
+
+```python
+def get_admin_audit(date_from: str, date_to: str) -> pd.DataFrame:
+    ...
+```
+
+### Поля выходного DataFrame
+
+| Колонка | Тип pandas | Источник | Описание |
+|---------|-----------|----------|----------|
+| `date` | object (str) | статистика кампаний | ключ группировки |
+| `account_id` | int64 | константа `1` | ключ группировки |
+| `source_type_id` | int64 | константа `10` | ключ группировки |
+| `owner_id` | int64 | `get_campaign_dict` (merge; NaN → 1) | ключ группировки |
+| `impressions` | int64 | сумма по дню | |
+| `clicks` | int64 | сумма по дню | |
+| `costs_nds` | float64 | сумма по дню | не округляется |
+| `costs_without_nds` | float64 | сумма по дню, round(2) | база расчёта Bidease |
+| `chef_flag` | int64 | константа `1` | дефолт |
+
+### Специфика / сложности реализации
+
+- **Страховка от потери строк:** `owner_id` после left-merge может быть NaN
+  (кампания в статистике, но не в справочнике) — NaN в ключе groupby молча
+  выбрасывает строку → `fillna(1)` до группировки.
+- Пустая статистика → пустой DataFrame, справочник НЕ запрашивается.
+- Округление: после суммирования округляется только база `costs_without_nds`
+  (зеркально avito, где округлялась их база `costs_nds`).
+
+### История изменений
+
+| Дата | Изменение | Причина |
+|------|-----------|---------|
+| 2026-07-22 | Первичная реализация | — |

@@ -1,12 +1,7 @@
-"""Unit-тесты get_campaign_dict — мок HTTP, без сети и .env.
+"""Unit-тесты get_campaign_dict — мок HTTP (conftest.api_env), без сети и .env.
 
-Мокается requests.Session.get настоящим requests.Response с байтовым телом —
-так проверяется и форс UTF-8 в _parse_csv (Content-Type без charset, факт API).
 Кейсы — из Acceptance Criteria спеки specs/01_spec_get_campaign_dict.md.
 """
-
-import requests
-import pytest
 
 import bidease
 from bidease import CAMPAIGN_DICT_COLUMNS, get_campaign_dict
@@ -33,40 +28,8 @@ CSV_MISSING_VALUES = (
 )
 
 
-def _mock_response(body: str) -> requests.Response:
-    """Настоящий requests.Response: тело — UTF-8-байты, Content-Type БЕЗ charset (факт API)."""
-    resp = requests.Response()
-    resp.status_code = 200
-    resp._content = body.encode("utf-8")
-    resp.headers["Content-Type"] = "text/csv"
-    # Как реальный HTTPAdapter.build_response: text/csv без charset → ISO-8859-1.
-    # Без этого resp.encoding остаётся None, text декодируется по apparent_encoding
-    # и тест НЕ ловит регрессию форса UTF-8 в _parse_csv.
-    resp.encoding = requests.utils.get_encoding_from_headers(resp.headers)
-    return resp
-
-
-@pytest.fixture
-def api_env(monkeypatch):
-    """API_TOKEN в окружении; фабрика подмены ответа Session.get."""
-    monkeypatch.setenv("API_TOKEN", "test-token")
-
-    def set_body(body: str):
-        captured = {}
-
-        def fake_get(self, url, params=None, timeout=None):
-            captured["url"] = url
-            captured["params"] = params
-            return _mock_response(body)
-
-        monkeypatch.setattr(requests.Session, "get", fake_get)
-        return captured
-
-    return set_body
-
-
 def test_normal_csv(api_env):
-    captured = api_env(CSV_NORMAL)
+    calls = api_env(CSV_NORMAL)
     df = get_campaign_dict()
 
     assert list(df.columns) == CAMPAIGN_DICT_COLUMNS
@@ -85,8 +48,8 @@ def test_normal_csv(api_env):
     assert row["owner_id"] == 1
     assert (df["id_key_camp"] == "1_" + df["campaign_id"].astype(str)).all()
 
-    # запрос: 4 группировки в нужном порядке, api-token присутствует, todate > fromdate
-    params = captured["params"]
+    # запрос: 4 группировки в нужном порядке, api-token присутствует
+    params = calls[0]["params"]
     groups = [v for k, v in params if k == "group"]
     assert groups == ["CampaignID", "CampaignName", "AdvertiserID", "ProductID"]
     keys = [k for k, _ in params]
@@ -122,13 +85,3 @@ def test_row_without_campaign_id_dropped(api_env):
     row = df.iloc[0]
     assert row["campaign_id"] == 154402
     assert bidease.pd.isna(row["product_id"])
-
-
-def test_other_functions_still_stubs():
-    for fn, args in (
-        (bidease.get_campaigns_daily_stat, ("2026-07-01", "2026-07-02")),
-        (bidease.get_creatives_daily_stat, ("2026-07-01", "2026-07-02")),
-        (bidease.get_admin_audit, ("2026-07-01", "2026-07-02")),
-    ):
-        with pytest.raises(NotImplementedError):
-            fn(*args)

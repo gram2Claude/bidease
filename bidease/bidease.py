@@ -1,10 +1,10 @@
 """Bidease Reporting API client.
 
-Публичные функции, возвращающие pandas DataFrame:
-- get_campaign_dict()                          — справочник кампаний из группировок отчёта [реализована]
-- get_campaigns_daily_stat(date_from, date_to) — дневная статистика по кампаниям [стаб]
-- get_creatives_daily_stat(date_from, date_to) — дневная статистика по креативам [стаб]
-- get_admin_audit(date_from, date_to)          — сводный аудит по дням (агрегат) [стаб]
+Публичные функции, возвращающие pandas DataFrame (все реализованы):
+- get_campaign_dict()                          — справочник кампаний из группировок отчёта
+- get_campaigns_daily_stat(date_from, date_to) — дневная статистика по кампаниям
+- get_creatives_daily_stat(date_from, date_to) — дневная статистика по креативам
+- get_admin_audit(date_from, date_to)          — сводный аудит по дням (агрегат)
 
 Учётные данные читаются из переменной окружения API_TOKEN
 (или передаются явно в BideaseClient).
@@ -59,6 +59,9 @@ GROUP_CSV_RENAME = {
     "productid": "product_id",
     "creativeid": "creative_id",
 }
+
+# Формат значений группировки `day` (факт 2026-07-22): американский порядок + время.
+DAY_CSV_FORMAT = "%m/%d/%Y %H:%M:%S"
 
 # ── Колонки итоговых DataFrame — фиксируют порядок и состав полей ─────────────
 # Предварительные наборы по manual_forms/03_ENTITY_FUNCTIONS.md;
@@ -228,8 +231,62 @@ def _validate_period(date_from: str, date_to: str) -> None:
         )
 
 
+def _fetch_daily_stat(date_from: str, date_to: str, groups: list[str]) -> pd.DataFrame:
+    """Валидация периода + GET stats с заданными группировками.
+
+    date_from/date_to — включительно; в запрос уходит todate = date_to + 1 день.
+    """
+    _validate_period(date_from, date_to)
+    client = BideaseClient()
+    params: list[tuple[str, Any]] = [
+        ("fromdate", date_from),
+        ("todate", _todate_exclusive(date_to)),
+    ]
+    params += [("group", g) for g in groups]
+    return client._get_report(params)
+
+
+def _parse_day_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Колонка `date` (CSV `day`, формат MM/DD/YYYY HH:MM:SS — факт) → строки YYYY-MM-DD.
+
+    Формат задан явно: несовпадение → громкое исключение (fail-loud, не тихий NaN).
+    """
+    df["date"] = pd.to_datetime(df["date"], format=DAY_CSV_FORMAT).dt.strftime("%Y-%m-%d")
+    return df
+
+
+def _vat_multiplier(date_series: pd.Series) -> pd.Series:
+    """Множитель НДС по году даты строки: год ≥ 2026 → 1.22 (22%), иначе 1.20 (20%).
+
+    Bidease отдаёт `spend` БЕЗ НДС (решение проекта 2026-07-21) — чтобы получить
+    сумму С НДС, УМНОЖАЕМ на (1 + ставка). Направление обратное avito (там spend
+    приходит с НДС и база делится).
+    """
+    year = pd.to_numeric(date_series.astype(str).str[:4], errors="coerce")
+    mult = pd.Series(1.20, index=date_series.index, dtype="float64")
+    mult[year >= 2026] = 1.22
+    return mult
+
+
+def _apply_stat_enrichment(df: pd.DataFrame) -> pd.DataFrame:
+    """Обогащение для статистики с расходами (соглашение проекта).
+
+    База — costs_without_nds ← spend (доллары БЕЗ НДС; float, round(2) — округляется
+    только база, производные не округляются). НДС по году даты строки (_vat_multiplier).
+    Агентская комиссия ak = 0.5. Валюта не пересчитывается (доллары).
+    """
+    df["costs_without_nds"] = pd.to_numeric(df["spend"], errors="coerce").fillna(0).astype(float).round(2)
+    df["costs_nds"] = df["costs_without_nds"] * _vat_multiplier(df["date"])
+    df["ak"] = 0.5
+    df["costs_nds_ak"] = df["costs_nds"] * (1 + 0.5)
+    df["costs_without_nds_ak"] = df["costs_without_nds"] * (1 + 0.5)
+    df["account_id"] = 1
+    df["source_type_id"] = 10
+    df["id_key_camp"] = "1_" + df["campaign_id"].astype(str)
+    return df
+
+
 # ── Публичные функции ─────────────────────────────────────────────────────────
-# Нереализованные — стабы NotImplementedError (Шаг 4: spec → plan → impl по одной).
 
 def get_campaign_dict() -> pd.DataFrame:
     """Справочник кампаний из группировок отчёта.
@@ -282,23 +339,55 @@ def get_campaign_dict() -> pd.DataFrame:
 def get_campaigns_daily_stat(date_from: str, date_to: str) -> pd.DataFrame:
     """Дневная статистика по кампаниям.
 
-    GET /stats, group=Day+CampaignID — один запрос на весь период.
-    date_from / date_to — включительно (todate API — эксклюзивная, учтено внутри).
+    GET /stats, group=Day+CampaignID — один запрос на весь период (группировка
+    серверная, пагинации нет). date_from / date_to — включительно
+    (todate API — эксклюзивная, учтено внутри).
 
     Возвращает DataFrame с колонками CAMPAIGNS_STAT_COLUMNS.
     """
-    raise NotImplementedError("Реализуется на Шаге 4 (spec → plan → impl)")
+    df = _fetch_daily_stat(date_from, date_to, ["Day", "CampaignID"])
+    if df.empty:
+        return pd.DataFrame(columns=CAMPAIGNS_STAT_COLUMNS)
+
+    df = df.rename(columns=GROUP_CSV_RENAME)
+    df = _parse_day_column(df)
+    df = df.dropna(subset=["campaign_id"])
+    if df.empty:
+        return pd.DataFrame(columns=CAMPAIGNS_STAT_COLUMNS)
+    df["campaign_id"] = df["campaign_id"].astype("int64")
+    df["impressions"] = pd.to_numeric(df["impressions"], errors="coerce").fillna(0).astype("int64")
+    df["clicks"] = pd.to_numeric(df["clicks"], errors="coerce").fillna(0).astype("int64")
+
+    df = _apply_stat_enrichment(df)
+    return df.reindex(columns=CAMPAIGNS_STAT_COLUMNS).reset_index(drop=True)
 
 
 def get_creatives_daily_stat(date_from: str, date_to: str) -> pd.DataFrame:
     """Дневная статистика по креативам.
 
     GET /stats, group=Day+CampaignID+CreativeID — один запрос на весь период.
-    date_from / date_to — включительно (todate API — эксклюзивная, учтено внутри).
+    Иерархия Bidease: кампания → креатив (групп нет), поэтому id_key_ad — без
+    group-звена (решение 2026-07-21). date_from / date_to — включительно.
 
     Возвращает DataFrame с колонками CREATIVES_STAT_COLUMNS.
     """
-    raise NotImplementedError("Реализуется на Шаге 4 (spec → plan → impl)")
+    df = _fetch_daily_stat(date_from, date_to, ["Day", "CampaignID", "CreativeID"])
+    if df.empty:
+        return pd.DataFrame(columns=CREATIVES_STAT_COLUMNS)
+
+    df = df.rename(columns=GROUP_CSV_RENAME)
+    df = _parse_day_column(df)
+    df = df.dropna(subset=["campaign_id", "creative_id"])
+    if df.empty:
+        return pd.DataFrame(columns=CREATIVES_STAT_COLUMNS)
+    df["campaign_id"] = df["campaign_id"].astype("int64")
+    df["creative_id"] = df["creative_id"].astype("int64")
+    df["impressions"] = pd.to_numeric(df["impressions"], errors="coerce").fillna(0).astype("int64")
+    df["clicks"] = pd.to_numeric(df["clicks"], errors="coerce").fillna(0).astype("int64")
+
+    df = _apply_stat_enrichment(df)
+    df["id_key_ad"] = df["id_key_camp"] + "_" + df["creative_id"].astype(str)
+    return df.reindex(columns=CREATIVES_STAT_COLUMNS).reset_index(drop=True)
 
 
 def get_admin_audit(date_from: str, date_to: str) -> pd.DataFrame:
@@ -306,8 +395,24 @@ def get_admin_audit(date_from: str, date_to: str) -> pd.DataFrame:
 
     Собственного эндпоинта нет — агрегат поверх get_campaigns_daily_stat:
     суммы impressions/clicks/costs_nds/costs_without_nds
-    по date × account_id × source_type_id × owner_id; chef_flag = 1.
+    по date × account_id × source_type_id × owner_id (owner_id — из справочника
+    кампаний, join по campaign_id; NaN → 1); chef_flag = 1.
 
     Возвращает DataFrame с колонками ADMIN_AUDIT_COLUMNS.
     """
-    raise NotImplementedError("Реализуется на Шаге 4 (spec → plan → impl)")
+    stats = get_campaigns_daily_stat(date_from, date_to)
+    if stats.empty:
+        return pd.DataFrame(columns=ADMIN_AUDIT_COLUMNS)
+
+    camps = get_campaign_dict()[["campaign_id", "owner_id"]]
+    df = stats.merge(camps, on="campaign_id", how="left")
+    # NaN в ключе groupby молча выбрасывает строку — страхуем дефолтом конвенции
+    df["owner_id"] = df["owner_id"].fillna(1).astype("int64")
+    df = (
+        df.groupby(["date", "account_id", "source_type_id", "owner_id"], as_index=False)
+          [["impressions", "clicks", "costs_nds", "costs_without_nds"]]
+          .sum()
+    )
+    df["costs_without_nds"] = df["costs_without_nds"].round(2)  # база расчёта у Bidease
+    df["chef_flag"] = 1
+    return df.reindex(columns=ADMIN_AUDIT_COLUMNS).reset_index(drop=True)

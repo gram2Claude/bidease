@@ -25,13 +25,15 @@ explicitly to the constructor.
 Шаги 0–3 завершены (структура, анкета, сводка API, скаффолд). Токен получен, проверен
 живым запросом, лежит в `bidease/.env` (`TEST_START_DATE=2026-07-21`, `TEST_END_DATE=2026-07-22`).
 
-**Шаг 4 — в процессе:** функция 1 — **`get_campaign_dict` РЕАЛИЗОВАНА 2026-07-22**
-(спека утверждена пользователем; план `plans/01_plan_get_campaign_dict.md`; юнит-тесты
-6/6 зелёные, вкл. мутационно проверенный гард форса UTF-8; smoke на живом API пройден —
-2 кампании; независимое код-ревью пройдено; реестр `info/01_functions_implemented.md`
-заведён). Остальные 3 функции — стабы; порядок: `get_campaigns_daily_stat` →
-`get_creatives_daily_stat` → `get_admin_audit` (гейт процесса: spec → утверждение →
-plan → impl → smoke). Следующий шаг — спека `get_campaigns_daily_stat`.
+**Шаг 4 ЗАВЕРШЁН (2026-07-22): все 4 функции реализованы.** Функция 1 — по гейту
+с утверждением спеки пользователем; функции 2–4 — по мандату «делай всё без остановок»
+(спеки/планы `specs/02–04`, `plans/02–04` финализированы автономно). Юнит-тесты
+18/18 зелёные (мок — реальный `requests.Response` c ISO-8859-1, стережёт форс UTF-8);
+smoke всех 4 функций на живом API пройдены (кампании: 4 строки, креативы: 8,
+admin_audit: 2 — суммы сходятся); независимые Opus-ревью обеих дельт пройдены;
+реестр `info/01_functions_implemented.md` полон. Выгрузки — в `bidease/raw_data/`
+(4 CSV). Следующий шаг — **Шаг 5 (опционально): ТЗ для внешнего разработчика** —
+нужен целевой язык от пользователя.
 
 **✅ Вопрос про данные закрыт (2026-07-22):** на аккаунте появилась реальная активность —
 с 2026-07-21 крутятся 2 кампании (`154369` android / `154402` ios, «x5_x5_igronik_Пятерочка_МояВыгода»,
@@ -75,15 +77,14 @@ Single-file library: `bidease/bidease.py`.
   (макс. 5 повторов, старт 1 с; лимиты API не документированы — защита).
 - `_parse_csv()` → пустое тело = пустой DataFrame.
 
-**Public functions** (all return `pd.DataFrame`; реализована `get_campaign_dict`,
-остальные — стабы Шага 4):
+**Public functions** (all return `pd.DataFrame`; все реализованы, Шаг 4 завершён):
 
 | Function | Granularity | Запрос к API |
 |----------|-------------|--------------|
 | `get_campaign_dict()` ✅ | справочник (кампании) | `group=CampaignID+CampaignName+AdvertiserID+ProductID`, период — последний год |
-| `get_campaigns_daily_stat(date_from, date_to)` | статистика по дням (кампании) | `group=Day+CampaignID`, один запрос на период |
-| `get_creatives_daily_stat(date_from, date_to)` | статистика по дням (креативы) | `group=Day+CampaignID+CreativeID`, один запрос на период |
-| `get_admin_audit(date_from, date_to)` | сводный аудит по дням (admin_audit) | собственного запроса нет — агрегат поверх campaigns stats |
+| `get_campaigns_daily_stat(date_from, date_to)` ✅ | статистика по дням (кампании) | `group=Day+CampaignID`, один запрос на период |
+| `get_creatives_daily_stat(date_from, date_to)` ✅ | статистика по дням (креативы) | `group=Day+CampaignID+CreativeID`, один запрос на период |
+| `get_admin_audit(date_from, date_to)` ✅ | сводный аудит по дням (admin_audit) | собственного запроса нет — агрегат поверх campaigns stats + owner_id из справочника |
 
 **Правила запроса данных (специфика Bidease — отличается от avito):**
 - **Справочников-эндпоинтов нет** — справочник кампаний собирается тем же stats-эндпоинтом
