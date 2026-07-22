@@ -174,10 +174,12 @@ class BideaseClient:
     def _parse_csv(resp: requests.Response) -> pd.DataFrame:
         """Парсит CSV-тело ответа в DataFrame.
 
-        Кодировка/разделитель в доках не зафиксированы (ожидается UTF-8 / `,`) —
-        подтверждается фактом на первом smoke-тесте и фиксируется в info/.
-        Пустой результат → пустой DataFrame.
+        Кодировка тела — UTF-8, но заголовок `Content-Type: text/csv` идёт БЕЗ charset,
+        поэтому requests по умолчанию декодирует как ISO-8859-1 и кириллица
+        (имена кампаний) превращается в кракозябры — декодировку форсируем
+        (факт живого API 2026-07-22). Разделитель `,`. Пустой результат → пустой DataFrame.
         """
+        resp.encoding = "utf-8"
         text = resp.text
         if not text.strip():
             return pd.DataFrame()
