@@ -138,6 +138,10 @@ def get_campaigns_daily_stat(date_from: str, date_to: str) -> pd.DataFrame:
 - **Битый `spend`** (пустой, нечисловой) → `costs_usd = 0.0`, строка НЕ отбрасывается,
   показы/клики сохраняются (`to_numeric(errors="coerce").fillna(0)`). То же правило
   применяется к `impressions` и `clicks`.
+- **`Retry-After` — недоверенный ввод** (фикс 2026-07-27): значение зажимается в
+  `[0, RATE_LIMIT_MAX_WAIT_SEC=300]`, а непарсящаяся форма (HTTP-date) откатывается к
+  собственному backoff. До фикса `-1` ронял выгрузку (`time.sleep(-1)` → ValueError),
+  а `86400` усыпил бы её на сутки.
 - 🔒 **Токен не утекает в исключения** (фикс 2026-07-27, найден ревью ТЗ): `api-token`
   едет в query, а requests кладёт полный URL в текст ошибки — теперь клиент
   перевыбрасывает исключения с `api-token=<redacted>` (`_redact`/`_sanitized`),
