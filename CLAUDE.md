@@ -106,6 +106,10 @@ Single-file library: `bidease/bidease.py`.
 **`BideaseClient`** — internal HTTP client:
 - Auth: **статический API-токен в query-параметре `api-token`** (не заголовок, не OAuth;
   эндпоинтов выпуска/обновления токена нет — токен выдаёт поддержка Bidease).
+- ⚠️ **Токен маскируется в исключениях** (`_redact` / `_sanitized`, 2026-07-27): requests
+  кладёт полный URL в текст своих ошибок, поэтому любая ошибка (401/400/таймаут) уносила
+  секрет в логи вызывающего. Клиент перевыбрасывает исключения requests с
+  `api-token=<redacted>`, сохраняя тип, `response` и код статуса. Не убирать.
 - Единственный эндпоинт: `GET https://ui-api.bidease.com/api/reporting/v1/stats` → **CSV**.
 - `_get_report(params)` → DataFrame; повторяемые query-параметры (`group`, `campaigns`, …)
   передаются списком пар `(ключ, значение)`. 429 → экспоненциальный backoff

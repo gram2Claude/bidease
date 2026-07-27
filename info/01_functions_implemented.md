@@ -136,7 +136,13 @@ def get_campaigns_daily_stat(date_from: str, date_to: str) -> pd.DataFrame:
   `test_bad_spend_becomes_zero`. Если приёмнику нужно арифметическое half-up —
   это отдельное решение, меняющее контракт.
 - **Битый `spend`** (пустой, нечисловой) → `costs_usd = 0.0`, строка НЕ отбрасывается,
-  показы/клики сохраняются (`to_numeric(errors="coerce").fillna(0)`).
+  показы/клики сохраняются (`to_numeric(errors="coerce").fillna(0)`). То же правило
+  применяется к `impressions` и `clicks`.
+- 🔒 **Токен не утекает в исключения** (фикс 2026-07-27, найден ревью ТЗ): `api-token`
+  едет в query, а requests кладёт полный URL в текст ошибки — теперь клиент
+  перевыбрасывает исключения с `api-token=<redacted>` (`_redact`/`_sanitized`),
+  сохраняя тип исключения, `response` и код статуса. Покрыто
+  `bidease/tests/test_client_errors.py`, проверено на живом 401.
 - ⚠️ **Показы зависят от разреза группировки** (факт 2026-07-27): `impressions` в
   разрезах `Day` / `Day+CampaignID` / `Day+CampaignID+CreativeID` за один период
   расходятся на 0.08–0.43 % — свойство агрегации Bidease (повторный запрос тем же
