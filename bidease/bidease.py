@@ -187,7 +187,13 @@ class BideaseClient:
                 if exc.response is not None and exc.response.status_code == 429:
                     if attempt == RATE_LIMIT_RETRY_MAX:
                         raise _sanitized(exc) from None
-                    retry_after = int(exc.response.headers.get("Retry-After", wait))
+                    # Retry-After по RFC бывает и числом секунд, и HTTP-date.
+                    # Дату не парсим — на ней откатываемся к собственному backoff,
+                    # но НЕ падаем (иначе 429 роняет всю выгрузку).
+                    try:
+                        retry_after = int(exc.response.headers.get("Retry-After", wait))
+                    except (TypeError, ValueError):
+                        retry_after = wait
                     logger.warning(
                         "429 Too Many Requests — ждём %d сек (попытка %d/%d)",
                         retry_after, attempt + 1, RATE_LIMIT_RETRY_MAX,

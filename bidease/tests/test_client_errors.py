@@ -58,6 +58,42 @@ def test_http_error_keeps_response(monkeypatch):
     assert ei.value.response.status_code == 400
 
 
+def test_retry_after_http_date_does_not_crash(monkeypatch, capsys):
+    """429 с Retry-After в формате HTTP-date не должен ронять выгрузку.
+
+    По RFC заголовок бывает и числом секунд, и датой. Эталон читал его только как
+    число — на дате падал ValueError вместо backoff (находка ревью 2026-07-27).
+    """
+    monkeypatch.setenv("API_TOKEN", TOKEN)
+    monkeypatch.setattr("bidease.time.sleep", lambda _s: None)   # без реальных пауз
+
+    calls = {"n": 0}
+    body = ("conversions,spend,impressions,clicks,day,campaignid\n"
+            "0,1.5,10,2,07/21/2026 00:00:00,154369\n")
+
+    def fake_get(self, url, params=None, timeout=None):
+        calls["n"] += 1
+        resp = requests.Response()
+        resp.url = URL_WITH_TOKEN
+        if calls["n"] == 1:                       # первый ответ — 429 с датой
+            resp.status_code = 429
+            resp.reason = "Too Many Requests"
+            resp.headers["Retry-After"] = "Wed, 21 Oct 2026 07:28:00 GMT"
+            resp._content = b""
+        else:                                     # повтор — успех
+            resp.status_code = 200
+            resp.headers["Content-Type"] = "text/csv"
+            resp._content = body.encode("utf-8")
+        return resp
+
+    monkeypatch.setattr(requests.Session, "get", fake_get)
+
+    df = get_campaigns_daily_stat("2026-07-21", "2026-07-22")
+
+    assert calls["n"] == 2                        # был ровно один повтор
+    assert len(df) == 1 and df.iloc[0]["costs_usd"] == 1.5
+
+
 def test_connection_error_does_not_leak_token(monkeypatch):
     """Сетевые ошибки requests тоже несут URL — и тоже должны быть очищены."""
     _install(monkeypatch, exc=requests.ConnectionError(
