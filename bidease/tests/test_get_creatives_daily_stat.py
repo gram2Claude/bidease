@@ -44,6 +44,19 @@ def test_normal_csv(api_env):
     assert [v for k, v in params if k == "group"] == ["Day", "CampaignID", "CreativeID"]
 
 
+def test_legacy_costs_fields_absent(api_env):
+    """Рублёвые costs_*-поля и ak не должны вернуться в контракт (ревизия 2026-07-27).
+
+    Проверка идёт по фактическим колонкам DataFrame, а не через CREATIVES_STAT_COLUMNS:
+    регрессия в самой константе прошла бы мимо сравнения со списком.
+    """
+    api_env(CSV_NORMAL)
+    df = get_creatives_daily_stat("2026-07-21", "2026-07-22")
+    for gone in ("costs_nds", "costs_without_nds", "costs_nds_ak", "costs_without_nds_ak", "ak"):
+        assert gone not in df.columns
+    assert "costs_usd" in df.columns
+
+
 def test_row_without_creative_id_dropped(api_env):
     api_env(CSV_MISSING_CREATIVE)
     df = get_creatives_daily_stat("2026-07-21", "2026-07-22")

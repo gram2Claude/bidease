@@ -54,6 +54,19 @@ def test_normal_aggregate(api_env):
     assert len(calls) == 2                                # статистика + справочник
 
 
+def test_legacy_costs_fields_absent(api_env):
+    """Рублёвые costs_*-поля не должны вернуться в контракт (ревизия 2026-07-27).
+
+    Проверка по фактическим колонкам, а не через ADMIN_AUDIT_COLUMNS: регрессия
+    в самой константе прошла бы мимо сравнения со списком.
+    """
+    api_env(_dispatcher(CSV_DICT, CSV_STATS))
+    df = get_admin_audit("2026-07-21", "2026-07-22")
+    for gone in ("costs_nds", "costs_without_nds", "costs_nds_ak", "costs_without_nds_ak", "ak"):
+        assert gone not in df.columns
+    assert "costs_usd" in df.columns
+
+
 def test_empty_stats_no_dict_request(api_env):
     calls = api_env(_dispatcher(CSV_DICT, CSV_STATS_EMPTY))
     df = get_admin_audit("2026-07-21", "2026-07-22")

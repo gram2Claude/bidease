@@ -24,6 +24,12 @@ CSV_MISSING_ID = (
     "0,2.0,20,2,07/21/2026 00:00:00,154369\n"
 )
 CSV_HEADER_ONLY = "conversions,spend,impressions,clicks,day,campaignid\n"
+CSV_BAD_SPEND = (                 # пустой и нечисловой spend — не должны ронять функцию
+    "conversions,spend,impressions,clicks,day,campaignid\n"
+    "0,,100,5,07/21/2026 00:00:00,154369\n"
+    "0,n/a,200,7,07/21/2026 00:00:00,154402\n"
+    "0,12.345,300,9,07/22/2026 00:00:00,154369\n"
+)
 
 
 def test_normal_csv(api_env):
@@ -58,6 +64,26 @@ def test_no_vat_across_year_boundary(api_env):
     # старые costs-поля и ak в контракте отсутствуют
     for gone in ("costs_nds", "costs_without_nds", "costs_nds_ak", "costs_without_nds_ak", "ak"):
         assert gone not in df.columns
+
+
+def test_bad_spend_becomes_zero(api_env):
+    """Пустой/нечисловой spend → costs_usd = 0.0 (строка не теряется, исключения нет).
+
+    Поведение зафиксировано контрактом: строки с битым расходом остаются в выгрузке
+    с нулём, метрики показов/кликов при этом сохраняются.
+    """
+    api_env(CSV_BAD_SPEND)
+    df = get_campaigns_daily_stat("2026-07-21", "2026-07-22")
+
+    assert len(df) == 3                                   # ни одна строка не отброшена
+    assert df.iloc[0]["costs_usd"] == 0.0                 # spend пустой
+    assert df.iloc[1]["costs_usd"] == 0.0                 # spend = "n/a"
+    # ⚠️ округление — numpy/pandas .round(2): half-to-even по двоичному float,
+    # поэтому 12.345 → 12.34 (НЕ 12.35). Поведение унаследовано от прежней схемы
+    # (так же округлялся costs_without_nds) и зафиксировано контрактом осознанно.
+    assert df.iloc[2]["costs_usd"] == pytest.approx(12.34)
+    assert df["impressions"].tolist() == [100, 200, 300]
+    assert df["costs_usd"].dtype.kind == "f"              # тип остаётся float
 
 
 def test_empty_header_only(api_env):
