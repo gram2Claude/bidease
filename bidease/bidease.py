@@ -43,6 +43,7 @@ STATS_PATH = "/api/reporting/v1/stats"
 HTTP_TIMEOUT_SEC = 30
 RATE_LIMIT_RETRY_MAX = 5        # максимум повторов при 429 (лимиты API не документированы — защита)
 RATE_LIMIT_BASE_SEC = 1         # начальная пауза при 429 (удваивается)
+RATE_LIMIT_MAX_WAIT_SEC = 300   # потолок паузы: Retry-After — недоверенный ввод (сервер может попросить сутки)
 
 PERIOD_MAX_DAYS = 365           # период отчёта — в пределах 1 года от текущей даты (лимит API)
 MAX_GROUPS = 7                  # максимум группировок (`group`) в одном запросе (лимит API)
@@ -194,6 +195,9 @@ class BideaseClient:
                         retry_after = int(exc.response.headers.get("Retry-After", wait))
                     except (TypeError, ValueError):
                         retry_after = wait
+                    # Заголовок недоверенный: отрицательное значение роняет time.sleep,
+                    # а огромное («Retry-After: 86400») усыпило бы выгрузку на сутки.
+                    retry_after = max(0, min(retry_after, RATE_LIMIT_MAX_WAIT_SEC))
                     logger.warning(
                         "429 Too Many Requests — ждём %d сек (попытка %d/%d)",
                         retry_after, attempt + 1, RATE_LIMIT_RETRY_MAX,

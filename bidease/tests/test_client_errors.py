@@ -105,6 +105,44 @@ def test_connection_error_does_not_leak_token(monkeypatch):
     assert TOKEN not in str(ei.value)
 
 
+@pytest.mark.parametrize("header, expected_sleep", [
+    ("-1", 0),          # отрицательное: time.sleep(-1) роняет выгрузку
+    ("86400", 300),     # сутки: пауза ограничена сверху
+    ("2", 2),           # нормальное значение проходит как есть
+])
+def test_retry_after_is_clamped(monkeypatch, header, expected_sleep):
+    """Retry-After — недоверенный ввод: не роняет процесс и не усыпляет его надолго."""
+    monkeypatch.setenv("API_TOKEN", TOKEN)
+    slept = []
+    monkeypatch.setattr("bidease.time.sleep", lambda s: slept.append(s))
+
+    calls = {"n": 0}
+    body = ("conversions,spend,impressions,clicks,day,campaignid\n"
+            "0,1.5,10,2,07/21/2026 00:00:00,154369\n")
+
+    def fake_get(self, url, params=None, timeout=None):
+        calls["n"] += 1
+        resp = requests.Response()
+        resp.url = URL_WITH_TOKEN
+        if calls["n"] == 1:
+            resp.status_code = 429
+            resp.reason = "Too Many Requests"
+            resp.headers["Retry-After"] = header
+            resp._content = b""
+        else:
+            resp.status_code = 200
+            resp.headers["Content-Type"] = "text/csv"
+            resp._content = body.encode("utf-8")
+        return resp
+
+    monkeypatch.setattr(requests.Session, "get", fake_get)
+
+    df = get_campaigns_daily_stat("2026-07-21", "2026-07-22")
+
+    assert len(df) == 1                      # выгрузка дошла до конца
+    assert slept == [expected_sleep]
+
+
 def test_429_retries_exhausted_does_not_leak_token(monkeypatch):
     """Отдельная ветка: токен маскируется и когда повторы при 429 исчерпаны."""
     monkeypatch.setenv("API_TOKEN", TOKEN)
