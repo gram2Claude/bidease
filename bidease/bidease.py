@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import time
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -62,6 +63,26 @@ GROUP_CSV_RENAME = {
 
 # Формат значений группировки `day` (факт 2026-07-22): американский порядок + время.
 DAY_CSV_FORMAT = "%m/%d/%Y %H:%M:%S"
+
+# Токен передаётся query-параметром, а requests кладёт ПОЛНЫЙ URL в текст своих
+# исключений (`401 Client Error ... for url: ...?api-token=...`) — без маскировки
+# секрет уезжает в логи вызывающего. Чистим текст любого исключения requests.
+_TOKEN_RE = re.compile(r"(api[-_]token=)[^&\s\"']+", re.I)
+
+
+def _redact(text: str) -> str:
+    """Маскирует значение api-token в тексте (URL попадает в сообщения об ошибках)."""
+    return _TOKEN_RE.sub(r"\1<redacted>", text)
+
+
+def _sanitized(exc: requests.RequestException) -> requests.RequestException:
+    """Копия исключения requests с очищенным от токена сообщением (тип сохраняется)."""
+    msg = _redact(str(exc))
+    try:
+        return type(exc)(msg, response=getattr(exc, "response", None),
+                         request=getattr(exc, "request", None))
+    except Exception:  # pragma: no cover — экзотический подтип со своим __init__
+        return requests.RequestException(msg)
 
 # ── Колонки итоговых DataFrame — фиксируют порядок и состав полей ─────────────
 # Предварительные наборы по manual_forms/03_ENTITY_FUNCTIONS.md;
@@ -152,6 +173,7 @@ class BideaseClient:
         `campaigns`, …) передаются несколькими парами с одним ключом.
         `api-token` добавляется автоматически.
         При 429 — экспоненциальный backoff (лимиты API не документированы — защита).
+        Исключения requests перевыбрасываются с замаскированным токеном (_sanitized).
         """
         url = f"{BASE_URL}{STATS_PATH}"
         full_params: list[tuple[str, Any]] = [("api-token", self._api_token), *params]
@@ -164,7 +186,7 @@ class BideaseClient:
             except requests.HTTPError as exc:
                 if exc.response is not None and exc.response.status_code == 429:
                     if attempt == RATE_LIMIT_RETRY_MAX:
-                        raise
+                        raise _sanitized(exc) from None
                     retry_after = int(exc.response.headers.get("Retry-After", wait))
                     logger.warning(
                         "429 Too Many Requests — ждём %d сек (попытка %d/%d)",
@@ -173,7 +195,10 @@ class BideaseClient:
                     time.sleep(retry_after)
                     wait *= 2
                 else:
-                    raise
+                    raise _sanitized(exc) from None
+            except requests.RequestException as exc:
+                # таймауты и сетевые ошибки тоже несут URL с токеном в тексте
+                raise _sanitized(exc) from None
         raise RuntimeError("unreachable")  # pragma: no cover
 
     @staticmethod
