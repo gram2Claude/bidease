@@ -8,7 +8,7 @@ HTTPError, а токен Bidease передаётся query-параметром
 import pytest
 import requests
 
-from bidease import get_campaigns_daily_stat
+from bidease import RATE_LIMIT_RETRY_MAX, _redact, get_campaigns_daily_stat
 
 TOKEN = "super-secret-token-value"
 URL_WITH_TOKEN = (
@@ -103,3 +103,41 @@ def test_connection_error_does_not_leak_token(monkeypatch):
         get_campaigns_daily_stat("2026-07-21", "2026-07-22")
 
     assert TOKEN not in str(ei.value)
+
+
+def test_429_retries_exhausted_does_not_leak_token(monkeypatch):
+    """Отдельная ветка: токен маскируется и когда повторы при 429 исчерпаны."""
+    monkeypatch.setenv("API_TOKEN", TOKEN)
+    monkeypatch.setattr("bidease.time.sleep", lambda _s: None)
+
+    calls = {"n": 0}
+
+    def always_429(self, url, params=None, timeout=None):
+        calls["n"] += 1
+        resp = requests.Response()
+        resp.status_code = 429
+        resp.reason = "Too Many Requests"
+        resp.url = URL_WITH_TOKEN
+        resp._content = b""
+        return resp
+
+    monkeypatch.setattr(requests.Session, "get", always_429)
+
+    with pytest.raises(requests.HTTPError) as ei:
+        get_campaigns_daily_stat("2026-07-21", "2026-07-22")
+
+    assert TOKEN not in str(ei.value)
+    assert calls["n"] == RATE_LIMIT_RETRY_MAX + 1      # исходный вызов + все повторы
+
+
+@pytest.mark.parametrize("text, expected_absent", [
+    (f"for url: https://x/stats?fromdate=2026-07-21&api-token={TOKEN}", TOKEN),   # токен последним
+    (f"https://x/stats?api_token={TOKEN}&group=Day", TOKEN),                      # через подчёркивание
+    (f"https://x/stats?API-TOKEN={TOKEN}", TOKEN),                                # верхний регистр
+    (f'"url": "https://x/stats?api-token={TOKEN}"', TOKEN),                       # в кавычках (JSON-лог)
+])
+def test_redact_covers_token_forms(text, expected_absent):
+    """_redact должен ловить токен в разных формах записи параметра и позициях."""
+    out = _redact(text)
+    assert expected_absent not in out
+    assert "<redacted>" in out
