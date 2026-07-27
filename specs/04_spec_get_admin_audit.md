@@ -7,6 +7,9 @@
 (суммы метрик по дням), `owner_id` подтягивается из `get_campaign_dict`
 (зеркально avito), `chef_flag = 1`.
 
+> **Ревизия 2026-07-27:** рублёвые `costs_nds`/`costs_without_nds` заменены одним
+> полем `costs_usd` (сумма долларового расхода за день). Обоснование — см. spec 02.
+
 ## Functional Requirements
 
 ### 1. Сигнатура функции
@@ -29,10 +32,8 @@ def get_admin_audit(date_from: str, date_to: str) -> pd.DataFrame:
    справочника 364 дня; NaN в ключе groupby молча теряет строки) →
    `fillna(1)` (дефолт конвенции) + `astype("int64")`.
 4. `groupby(["date", "account_id", "source_type_id", "owner_id"], as_index=False)`
-   → суммы `impressions`, `clicks`, `costs_nds`, `costs_without_nds`.
-5. `costs_without_nds` (— **база** расчёта у Bidease) после суммирования →
-   `round(2)`; `costs_nds` не округляется (зеркально avito, где округлялась
-   база `costs_nds`).
+   → суммы `impressions`, `clicks`, `costs_usd`.
+5. `costs_usd` после суммирования → `round(2)` (снимает хвост сложения float).
 6. `chef_flag = 1`; `reindex(columns=ADMIN_AUDIT_COLUMNS)`.
 
 ### 3. Возвращаемый DataFrame
@@ -47,8 +48,7 @@ def get_admin_audit(date_from: str, date_to: str) -> pd.DataFrame:
 | `owner_id` | int64 | из `get_campaign_dict` (merge по `campaign_id`; NaN → 1) |
 | `impressions` | int64 | сумма по дню |
 | `clicks` | int64 | сумма по дню |
-| `costs_nds` | float | сумма по дню (не округляется) |
-| `costs_without_nds` | float | сумма по дню, round(2) — база |
+| `costs_usd` | float | сумма долларового расхода по дню, round(2) |
 | `chef_flag` | int64 | константа `1` (дефолт) |
 
 ### 4. Изменения в `bidease.py`
@@ -69,12 +69,14 @@ def get_admin_audit(date_from: str, date_to: str) -> pd.DataFrame:
   строки НЕ теряются.
 - Все константы (`account_id`, `source_type_id`) одинаковы → фактическая
   группировка = по `date` × `owner_id`; при константном `owner_id=1` — по дням.
-- Свежие даты «плывут» — суммы двух последовательных вызовов могут отличаться.
+- Суммы аудита совпадают с `get_campaigns_daily_stat` точно (агрегат считается из неё),
+  но **не обязаны** совпадать по показам с `get_creatives_daily_stat` — у Bidease
+  агрегат показов зависит от разреза (факт 2026-07-27, см. `info/00_api_methods.md`).
 
 ## Acceptance Criteria
 
 - [ ] DataFrame ровно с колонками `ADMIN_AUDIT_COLUMNS` в порядке.
-- [ ] Суммы `impressions`/`clicks`/`costs_*` равны суммам строк дневной статистики
+- [ ] Суммы `impressions`/`clicks`/`costs_usd` равны суммам строк дневной статистики
       по соответствующему дню.
 - [ ] `chef_flag == 1`; `owner_id` из справочника (NaN → 1, строки не теряются).
 - [ ] Пустой период → пустой DataFrame с колонками, без исключений.

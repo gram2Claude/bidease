@@ -81,22 +81,19 @@ CAMPAIGN_DICT_COLUMNS = [
     "owner_id",          # константа: 1
 ]
 
-# ⚠️ НДС (решение проекта 2026-07-21): spend в источнике — доллары БЕЗ НДС.
-# Поэтому направление расчёта ОБРАТНОЕ avito:
-#   costs_without_nds ← spend (float, округление до 2 знаков)
-#   costs_nds = costs_without_nds * (1 + ставка_НДС); ставка по году даты строки:
-#   год ≥ 2026 → 22% (множитель 1.22), ранее → 20% (множитель 1.20)
+# ⚠️ ВАЛЮТА (решение проекта 2026-07-27): Bidease отдаёт `spend` в ДОЛЛАРАХ США,
+# тогда как поля `costs_*` конвенции проекта подразумевают РУБЛИ. Поэтому вся
+# рублёвая группа полей (costs_nds / costs_without_nds / costs_*_ak) и константа
+# агентской комиссии `ak` из итоговых таблиц УБРАНЫ, а расход отдаётся ровно одним
+# полем `costs_usd` ← spend как есть (float, округление до 2 знаков), без НДС и
+# без агентской надбавки. Пересчёт валюты и налогов — на стороне приёмника.
 
 CAMPAIGNS_STAT_COLUMNS = [
     "date",                   # Day (CSV-колонка `day`)
     "campaign_id",            # CampaignID (CSV-колонка `campaignid`)
     "impressions",            # impressions
     "clicks",                 # clicks
-    "costs_nds",              # costs_without_nds * (1 + ставка_НДС по году даты)
-    "costs_without_nds",      # ← spend (доллары БЕЗ НДС; float, округление до 2 знаков)
-    "ak",                     # константа: 0.5 (агентская комиссия)
-    "costs_nds_ak",           # вычисляется: costs_nds * (1 + ak)
-    "costs_without_nds_ak",   # вычисляется: costs_without_nds * (1 + ak)
+    "costs_usd",              # ← spend (доллары США как есть; float, округление до 2 знаков)
     "account_id",             # константа: 1
     "source_type_id",         # константа: 10
     "id_key_camp",            # вычисляется: "1_" + campaign_id
@@ -108,11 +105,7 @@ CREATIVES_STAT_COLUMNS = [
     "creative_id",            # CreativeID (CSV-колонка `creativeid`)
     "impressions",
     "clicks",
-    "costs_nds",
-    "costs_without_nds",
-    "ak",
-    "costs_nds_ak",
-    "costs_without_nds_ak",
+    "costs_usd",
     "account_id",
     "source_type_id",
     "id_key_camp",
@@ -126,8 +119,7 @@ ADMIN_AUDIT_COLUMNS = [
     "owner_id",
     "impressions",
     "clicks",
-    "costs_nds",
-    "costs_without_nds",
+    "costs_usd",
     "chef_flag",              # константа: 1 (дефолт)
 ]
 
@@ -255,31 +247,15 @@ def _parse_day_column(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _vat_multiplier(date_series: pd.Series) -> pd.Series:
-    """Множитель НДС по году даты строки: год ≥ 2026 → 1.22 (22%), иначе 1.20 (20%).
-
-    Bidease отдаёт `spend` БЕЗ НДС (решение проекта 2026-07-21) — чтобы получить
-    сумму С НДС, УМНОЖАЕМ на (1 + ставка). Направление обратное avito (там spend
-    приходит с НДС и база делится).
-    """
-    year = pd.to_numeric(date_series.astype(str).str[:4], errors="coerce")
-    mult = pd.Series(1.20, index=date_series.index, dtype="float64")
-    mult[year >= 2026] = 1.22
-    return mult
-
-
 def _apply_stat_enrichment(df: pd.DataFrame) -> pd.DataFrame:
     """Обогащение для статистики с расходами (соглашение проекта).
 
-    База — costs_without_nds ← spend (доллары БЕЗ НДС; float, round(2) — округляется
-    только база, производные не округляются). НДС по году даты строки (_vat_multiplier).
-    Агентская комиссия ak = 0.5. Валюта не пересчитывается (доллары).
+    Расход — единственное поле costs_usd ← spend как есть (доллары США; float,
+    round(2)). НДС и агентская комиссия НЕ применяются, валюта не пересчитывается:
+    рублёвые costs_*-поля конвенции для этого источника неприменимы
+    (решение проекта 2026-07-27).
     """
-    df["costs_without_nds"] = pd.to_numeric(df["spend"], errors="coerce").fillna(0).astype(float).round(2)
-    df["costs_nds"] = df["costs_without_nds"] * _vat_multiplier(df["date"])
-    df["ak"] = 0.5
-    df["costs_nds_ak"] = df["costs_nds"] * (1 + 0.5)
-    df["costs_without_nds_ak"] = df["costs_without_nds"] * (1 + 0.5)
+    df["costs_usd"] = pd.to_numeric(df["spend"], errors="coerce").fillna(0).astype(float).round(2)
     df["account_id"] = 1
     df["source_type_id"] = 10
     df["id_key_camp"] = "1_" + df["campaign_id"].astype(str)
@@ -394,7 +370,7 @@ def get_admin_audit(date_from: str, date_to: str) -> pd.DataFrame:
     """Сводный аудит по дням (admin_audit).
 
     Собственного эндпоинта нет — агрегат поверх get_campaigns_daily_stat:
-    суммы impressions/clicks/costs_nds/costs_without_nds
+    суммы impressions/clicks/costs_usd
     по date × account_id × source_type_id × owner_id (owner_id — из справочника
     кампаний, join по campaign_id; NaN → 1); chef_flag = 1.
 
@@ -410,9 +386,9 @@ def get_admin_audit(date_from: str, date_to: str) -> pd.DataFrame:
     df["owner_id"] = df["owner_id"].fillna(1).astype("int64")
     df = (
         df.groupby(["date", "account_id", "source_type_id", "owner_id"], as_index=False)
-          [["impressions", "clicks", "costs_nds", "costs_without_nds"]]
+          [["impressions", "clicks", "costs_usd"]]
           .sum()
     )
-    df["costs_without_nds"] = df["costs_without_nds"].round(2)  # база расчёта у Bidease
+    df["costs_usd"] = df["costs_usd"].round(2)  # сумма float-слагаемых — снимаем хвост
     df["chef_flag"] = 1
     return df.reindex(columns=ADMIN_AUDIT_COLUMNS).reset_index(drop=True)

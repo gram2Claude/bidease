@@ -44,11 +44,10 @@ def test_normal_aggregate(api_env):
     # суммы по дню 21.07: две кампании
     assert by_date.loc["2026-07-21", "impressions"] == 30
     assert by_date.loc["2026-07-21", "clicks"] == 3
-    assert by_date.loc["2026-07-21", "costs_without_nds"] == pytest.approx(150.0)
-    assert by_date.loc["2026-07-21", "costs_nds"] == pytest.approx(150.0 * 1.22)
+    assert by_date.loc["2026-07-21", "costs_usd"] == pytest.approx(150.0)
     # 22.07: одна кампания
     assert by_date.loc["2026-07-22", "impressions"] == 5
-    assert by_date.loc["2026-07-22", "costs_without_nds"] == pytest.approx(10.5)
+    assert by_date.loc["2026-07-22", "costs_usd"] == pytest.approx(10.5)
     assert (df["chef_flag"] == 1).all()
     assert (df["owner_id"] == 1).all()
     assert (df["account_id"] == 1).all() and (df["source_type_id"] == 10).all()

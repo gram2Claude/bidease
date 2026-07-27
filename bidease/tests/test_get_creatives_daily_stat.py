@@ -35,8 +35,7 @@ def test_normal_csv(api_env):
     row = df.iloc[0]
     assert row["date"] == "2026-07-21"
     assert row["campaign_id"] == 154369 and row["creative_id"] == 647445
-    assert row["costs_without_nds"] == pytest.approx(480.95)
-    assert row["costs_nds"] == pytest.approx(480.95 * 1.22)
+    assert row["costs_usd"] == pytest.approx(480.95)      # spend как есть, round(2)
     assert row["id_key_camp"] == "1_154369"
     assert row["id_key_ad"] == "1_154369_647445"      # без group-звена (групп нет)
     assert (df["id_key_ad"] == df["id_key_camp"] + "_" + df["creative_id"].astype(str)).all()

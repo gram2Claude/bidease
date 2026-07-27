@@ -5,6 +5,10 @@
 На основании `specs/04_spec_get_admin_audit.md`. Агрегат без собственного запроса —
 поверх `get_campaigns_daily_stat` + `owner_id` из `get_campaign_dict` (зеркало avito).
 
+> **⚠️ Исторический артефакт.** План описывает реализацию от 2026-07-22. Ревизией
+> 2026-07-27 суммируемые расходы — одно поле `costs_usd` (вместо `costs_nds` /
+> `costs_without_nds`). Актуальный контракт — спека 04 и `info/01_functions_implemented.md`.
+
 ## Изменения в `bidease.py`
 
 ### 1. Константы — `ADMIN_AUDIT_COLUMNS` уже в скаффолде; новых нет.

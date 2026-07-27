@@ -36,12 +36,8 @@ def test_normal_csv(api_env):
     assert row["date"] == "2026-07-21"                       # MM/DD/YYYY → YYYY-MM-DD
     assert row["campaign_id"] == 154369
     assert row["impressions"] == 187663 and row["clicks"] == 7329
-    # направление НДС обратное avito: база — без НДС (spend), НДС умножением
-    assert row["costs_without_nds"] == pytest.approx(556.32)          # round(spend, 2)
-    assert row["costs_nds"] == pytest.approx(556.32 * 1.22)           # 2026 → 22%
-    assert row["ak"] == 0.5
-    assert row["costs_nds_ak"] == pytest.approx(556.32 * 1.22 * 1.5)
-    assert row["costs_without_nds_ak"] == pytest.approx(556.32 * 1.5)
+    # расход — единственное поле costs_usd: spend как есть (доллары), round(2)
+    assert row["costs_usd"] == pytest.approx(556.32)                  # round(spend, 2)
     assert row["account_id"] == 1 and row["source_type_id"] == 10
     assert (df["id_key_camp"] == "1_" + df["campaign_id"].astype(str)).all()
 
@@ -52,12 +48,16 @@ def test_normal_csv(api_env):
     assert dict(params)["todate"] == "2026-07-23"
 
 
-def test_vat_year_boundary(api_env):
+def test_no_vat_across_year_boundary(api_env):
+    """Расход не пересчитывается: НДС/комиссия не применяются ни в каком году."""
     api_env(CSV_YEAR_BOUNDARY)
     df = get_campaigns_daily_stat("2025-12-31", "2026-01-01")
     by_date = df.set_index("date")
-    assert by_date.loc["2025-12-31", "costs_nds"] == pytest.approx(100.0 * 1.20)
-    assert by_date.loc["2026-01-01", "costs_nds"] == pytest.approx(100.0 * 1.22)
+    assert by_date.loc["2025-12-31", "costs_usd"] == pytest.approx(100.0)
+    assert by_date.loc["2026-01-01", "costs_usd"] == pytest.approx(100.0)
+    # старые costs-поля и ak в контракте отсутствуют
+    for gone in ("costs_nds", "costs_without_nds", "costs_nds_ak", "costs_without_nds_ak", "ak"):
+        assert gone not in df.columns
 
 
 def test_empty_header_only(api_env):
